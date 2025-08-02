@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './KanbanCard.css';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { updateEvent } from '../services/api';
 import { CalendarDaysIcon,
   UserIcon,
   BuildingOfficeIcon,
@@ -25,6 +26,10 @@ import { CalendarDaysIcon,
 
 export default function KanbanCard({ event, column }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [eventData, setEventData] = useState(event);
+  const [editingField, setEditingField] = useState(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: event.id });
 
@@ -45,7 +50,7 @@ export default function KanbanCard({ event, column }) {
     const date = new Date(dateString);
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = String(date.getFullYear()).slice(-2); // Pega apenas os 2 últimos dígitos do ano
+    const year = String(date.getFullYear()).slice(-2);
     return `${day}/${month}/${year}`;
   };
 
@@ -62,6 +67,85 @@ export default function KanbanCard({ event, column }) {
     } else {
       return `${formattedStart} - ${formattedEnd}`;
     }
+  };
+
+  // ✅ NOVO: Função para iniciar edição
+  const startEditing = (field, currentValue) => {
+    setEditingField(field);
+    setEditingValue(currentValue || '');
+  };
+
+  // ✅ NOVO: Função para cancelar edição
+  const cancelEditing = () => {
+    setEditingField(null);
+    setEditingValue('');
+  };
+
+  // ✅ NOVO: Função para salvar edição
+  const saveEdit = async () => {
+    if (editingField && editingValue !== eventData[editingField]) {
+      setIsUpdating(true);
+      try {
+        const updatedData = { [editingField]: editingValue };
+        await updateEvent(eventData.id, updatedData);
+        setEventData(prev => ({ ...prev, [editingField]: editingValue }));
+        console.log(`✅ Campo ${editingField} atualizado para: ${editingValue}`);
+      } catch (error) {
+        console.error('Erro ao atualizar evento:', error);
+        // Rollback em caso de erro
+      } finally {
+        setIsUpdating(false);
+      }
+    }
+    cancelEditing();
+  };
+
+  // ✅ NOVO: Função para lidar com teclas
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      cancelEditing();
+    }
+  };
+
+  // ✅ NOVO: Componente para campo editável
+  const EditableField = ({ field, value, children, isTextarea = false }) => {
+    if (editingField === field) {
+      const InputComponent = isTextarea ? 'textarea' : 'input';
+      return (
+        <InputComponent
+          type={isTextarea ? undefined : 'text'}
+          value={editingValue}
+          onChange={(e) => setEditingValue(e.target.value)}
+          onBlur={saveEdit}
+          onKeyDown={handleKeyPress}
+          autoFocus
+          className="inline-edit-input"
+          style={{
+            width: '100%',
+            border: 'none',
+            background: 'transparent',
+            font: 'inherit',
+            color: 'inherit',
+            outline: 'none',
+            resize: isTextarea ? 'vertical' : 'none',
+            minHeight: isTextarea ? '60px' : 'auto'
+          }}
+        />
+      );
+    }
+
+    return (
+      <span
+        onDoubleClick={() => startEditing(field, value)}
+        style={{ cursor: 'text' }}
+        title="Duplo clique para editar"
+      >
+        {children}
+      </span>
+    );
   };
 
   /*Função p adicionar membro manualmente*/ 
@@ -225,8 +309,8 @@ const removeEventMember = (memberId) => {
 
     }
 
-    if (!item.completed && event.endDate) {
-      const deadline = new Date(event.endDate);
+    if (!item.completed && eventData.endDate) {
+      const deadline = new Date(eventData.endDate);
       const now = new Date();
       const msInDay = 24 * 60 * 60 * 1000;
       const diffDays = Math.floor((deadline - now) / msInDay);
@@ -235,12 +319,12 @@ const removeEventMember = (memberId) => {
         console.log('⏰ Enviar lembrete: item não concluído com prazo próximo', {
           item: item.text,
           responsavel: item.responsible.name,
-          prazoFinal: event.endDate
+          prazoFinal: eventData.endDate
       });
     }
   }
   });
-}, [checklistItems]);
+}, [checklistItems, eventData.endDate]);
 
   
   
@@ -254,7 +338,7 @@ const removeEventMember = (memberId) => {
       };
       setComments(prev => ({
         ...prev,
-        [event.id]: [...(prev[event.id] || []), newCommentObj]
+        [eventData.id]: [...(prev[eventData.id] || []), newCommentObj]
       }));
       setNewComment('');
     }
@@ -272,7 +356,11 @@ const removeEventMember = (memberId) => {
       >
         {/* Header do Card */}
         <div className="card-header">
-          <h4 className="card-title">{event.title}</h4>
+          <h4 className="card-title">
+            <EditableField field="title" value={eventData.title}>
+              {eventData.title}
+            </EditableField>
+          </h4>
           <button 
             className="card-expand-button"
             onClick={handleOpenModal}
@@ -289,7 +377,7 @@ const removeEventMember = (memberId) => {
               <CalendarDaysIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
             </span>
             <span className="info-label">Data:</span>
-            <span className="info-value">{formatDateRange(event.startDate, event.endDate)}</span>
+            <span className="info-value">{formatDateRange(eventData.startDate, eventData.endDate)}</span>
           </div>
 
           <div className="info-item">
@@ -297,7 +385,11 @@ const removeEventMember = (memberId) => {
               <UserIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
             </span>
             <span className="info-label">Responsável:</span>
-            <span className="info-value">{event.requester || 'N/A'}</span>
+            <span className="info-value">
+              <EditableField field="requester" value={eventData.requester}>
+                {eventData.requester || 'N/A'}
+              </EditableField>
+            </span>
           </div>
 
           <div className="info-item">
@@ -307,9 +399,9 @@ const removeEventMember = (memberId) => {
             <span className="info-label">Prioridade:</span>
             <span 
               className="priority-badge"
-              style={{ color: getPriorityColor(event.priority || 'Alta') }}
+              style={{ color: getPriorityColor(eventData.priority || 'Alta') }}
             >
-              {event.priority || 'Alta'}
+              {eventData.priority || 'Alta'}
             </span>
           </div>
         </div>
@@ -321,7 +413,11 @@ const removeEventMember = (memberId) => {
           <div className="modal-content" onClick={handleModalClick}>
             {/* Header do Modal */}
             <div className="modal-header">
-              <h2 className="modal-title">{event.title}</h2>
+              <h2 className="modal-title">
+                <EditableField field="title" value={eventData.title}>
+                  {eventData.title}
+                </EditableField>
+              </h2>
               <button 
                 className="modal-close-button"
                 onClick={handleCloseModal}
@@ -336,69 +432,111 @@ const removeEventMember = (memberId) => {
               {/* Informações principais */}
               <div className="modal-info-grid">
                 <div className="modal-info-item">
-                  <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }} /*  Alinhamento e espaçamento*/>
-                    <CalendarDaysIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */} 
+                  <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <CalendarDaysIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Data:
                   </span>
-                  <span className="modal-info-value">{formatDateRange(event.startDate, event.endDate)}</span>
+                  <span className="modal-info-value">{formatDateRange(eventData.startDate, eventData.endDate)}</span>
                 </div>
                 <div className="modal-info-item">
-                  <span className="modal-info-label"style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}> 
-                    <UserGroupIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */}
-                    Responsável:</span>
-                  <span className="modal-info-value">{event.requester || 'N/A'}</span>
-                </div>
-                <div className="modal-info-item">
-                  <span className="modal-info-label"style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <UserIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */} 
-                    Organizador:</span>
-                  <span className="modal-info-value">{event.organizer || 'N/A'}</span>
-                </div>
-                <div className="modal-info-item">
-                  <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <MapPinIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */}  
-                    Local:</span>
-                  <span className="modal-info-value">{event.location || 'N/A'}</span>
+                  <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}> 
+                    <UserGroupIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Responsável:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="requester" value={eventData.requester}>
+                      {eventData.requester || 'N/A'}
+                    </EditableField>
+                  </span>
                 </div>
                 <div className="modal-info-item">
                   <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <ExclamationTriangleIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */}
-                    Prioridade:</span>
+                    <UserIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Organizador:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="organizer" value={eventData.organizer}>
+                      {eventData.organizer || 'N/A'}
+                    </EditableField>
+                  </span>
+                </div>
+                <div className="modal-info-item">
+                  <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <MapPinIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Local:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="location" value={eventData.location}>
+                      {eventData.location || 'N/A'}
+                    </EditableField>
+                  </span>
+                </div>
+                <div className="modal-info-item">
+                  <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <ExclamationTriangleIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Prioridade:
+                  </span>
                   <span 
                     className="modal-priority-badge"
-                    style={{ color: getPriorityColor(event.priority || 'Alta') }}
+                    style={{ color: getPriorityColor(eventData.priority || 'Alta') }}
                   >
-                    {event.priority || 'Alta'}
+                    {eventData.priority || 'Alta'}
                   </span>
                 </div>
                 <div className="modal-info-item">
                   <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <TagIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */} 
-                    Tipo:</span>
-                  <span className="modal-info-value">{event.type || 'N/A'}</span>
+                    <TagIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Tipo:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="eventType" value={eventData.eventType}>
+                      {eventData.eventType || 'N/A'}
+                    </EditableField>
+                  </span>
                 </div>
                 <div className="modal-info-item">
                   <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <ComputerDesktopIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */} 
-                    Formato:</span>
-                  <span className="modal-info-value">{event.format || 'N/A'}</span>
+                    <ComputerDesktopIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Formato:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="eventFormat" value={eventData.eventFormat}>
+                      {eventData.eventFormat || 'N/A'}
+                    </EditableField>
+                  </span>
                 </div> 
                 <div className="modal-info-item">
                   <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <CurrencyDollarIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */} 
-                    Orçamento:</span>
-                  <span className="modal-info-value">{formatBudget(event.estimatedBudget)}</span>
+                    <CurrencyDollarIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Orçamento:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="estimatedBudget" value={eventData.estimatedBudget}>
+                      {formatBudget(eventData.estimatedBudget)}
+                    </EditableField>
+                  </span>
                 </div>
                 <div className="modal-info-item">
                   <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <UsersIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */} 
-                    Participantes:</span>
-                  <span className="modal-info-value">{event.estimatedParticipants || 'N/A'}</span>
+                    <UsersIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Participantes:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="estimatedAttendees" value={eventData.estimatedAttendees}>
+                      {eventData.estimatedAttendees || 'N/A'}
+                    </EditableField>
+                  </span>
                 </div>
                 <div className="modal-info-item">
                   <span className="modal-info-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <CubeIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} /> {/*  Ícone Heroicon inserido */} 
-                    Centro de Custo:</span>
-                  <span className="modal-info-value">{event.costCenter || 'N/A'}</span>
+                    <CubeIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                    Centro de Custo:
+                  </span>
+                  <span className="modal-info-value">
+                    <EditableField field="costCenter" value={eventData.costCenter}>
+                      {eventData.costCenter || 'N/A'}
+                    </EditableField>
+                  </span>
                 </div>
               </div>
 
@@ -408,26 +546,34 @@ const removeEventMember = (memberId) => {
                 onClick={() => setDescriptionExpanded(!descriptionExpanded)}
               >
                 <span className="modal-dropdown-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  Descrição Completa</span>
-                  {/* ✅ Ícone substituindo a seta ▼ */}
-                    <ChevronDownIcon
-                      style={{ width: '16px', height: '16px' }} // 🔧 Ajuste direto via inline style
-                        className={`text-gray-500 transition-transform duration-200 ${descriptionExpanded ? 'rotate-180' : ''}`} />
-                       </button>
+                  Descrição Completa
+                </span>
+                <ChevronDownIcon
+                  style={{ width: '16px', height: '16px' }}
+                  className={`text-gray-500 transition-transform duration-200 ${descriptionExpanded ? 'rotate-180' : ''}`} 
+                />
+              </button>
               {descriptionExpanded && (
                 <div className="modal-dropdown-content">
                   <div className="modal-description-item">
-                    <span className="modal-description-text">{event.description || 'Descrição do evento não disponível.'}</span>
+                    <EditableField field="description" value={eventData.description} isTextarea={true}>
+                      <span className="modal-description-text">
+                        {eventData.description || 'Nenhuma descrição disponível.'}
+                      </span>
+                    </EditableField>
                   </div>
                 </div>
               )}
 
-              {/* ✅ NOVO: Dropdown de Check List Aprimorado */}
+              {/* Dropdown de Check List */}
               <button 
                 className="modal-dropdown-header"
                 onClick={() => setChecklistExpanded(!checklistExpanded)}
               >
-                <span className="modal-dropdown-title">Check List</span>
+                <span className="modal-dropdown-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <ClipboardDocumentListIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                  Check List
+                </span>
                 <ChevronDownIcon
                   style={{ width: '16px', height: '16px' }}
                   className={`text-gray-500 transition-transform duration-200 ${checklistExpanded ? 'rotate-180' : ''}`} 
@@ -435,115 +581,141 @@ const removeEventMember = (memberId) => {
               </button>
               {checklistExpanded && (
                 <div className="modal-dropdown-content">
-                  {checklistItems.map(item => (
-                    <div key={item.id} className="modal-checklist-item">
-                      <input 
-                        type="checkbox" 
-                        checked={item.completed}
-                        onChange={() => toggleChecklistItem(item.id)}
-                      />
-                      <span>{item.text}</span>
-                      
-                      {/* ✅ NOVO: Área de controles que aparece no hover */}
-                      <div className="checklist-controls">
-                        {/* Botão X para remover */}
-                        <button 
+                  <div className="modal-checklist">
+                    {checklistItems.map((item) => (
+                      <div key={item.id} className="modal-checklist-item">
+                        <div className="checklist-item-main">
+                          <input
+                            type="checkbox"
+                            id={`checklist-${item.id}`}
+                            checked={item.completed}
+                            onChange={() => toggleChecklistItem(item.id)}
+                            className="checklist-checkbox"
+                          />
+                          <label 
+                            htmlFor={`checklist-${item.id}`}
+                            className={`checklist-label ${item.completed ? 'completed' : ''}`}
+                          >
+                            {item.text}
+                          </label>
+                          
+                          {/* Responsável */}
+                          <div className="checklist-responsible">
+                            {item.responsible ? (
+                              <div className="responsible-assigned">
+                                <div className="responsible-avatar">
+                                  {item.responsible.initials}
+                                </div>
+                                <button
+                                  className="remove-responsible-button"
+                                  onClick={() => removeResponsible(item.id)}
+                                  title="Remover responsável"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ) : (
+                              <select
+                                className="assign-responsible-button"
+                                onChange={(e) => {
+                                  const memberId = parseInt(e.target.value);
+                                  const member = availableMembers.find(m => m.id === memberId);
+                                  if (member) {
+                                    assignResponsible(item.id, member);
+                                  }
+                                  e.target.value = '';
+                                }}
+                                defaultValue=""
+                              >
+                                <option value="" disabled>Atribuir responsável</option>
+                                {availableMembers.map(member => (
+                                  <option key={member.id} value={member.id}>
+                                    {member.name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Botão de remover item */}
+                        <button
                           className="remove-checklist-button"
                           onClick={() => removeChecklistItem(item.id)}
                           title="Remover item"
                         >
-                          <XMarkIcon style={{ width: '16px', height: '16px' }} />
+                          ×
                         </button>
-                        
-                        {/* Avatar do responsável OU botão de atribuir */}
-                        {item.responsible ? (
-                          <div 
-                            className="assigned-avatar"
-                            onClick={() => removeResponsible(item.id)}
-                            title={`Responsável: ${item.responsible.name} (clique para remover)`}
-                          >
-                            {item.responsible.initials}
-                          </div>
-                        ) : (
-                          <div className="assign-responsible-dropdown">
-                            <button className="assign-responsible-button">
-                              Atribuir responsável
-                            </button>
-                            <div className="assign-dropdown-menu">
-                              {availableMembers.map(member => (
-                                <button
-                                  key={member.id}
-                                  className="assign-dropdown-item"
-                                  onClick={() => assignResponsible(item.id, member)}
-                                >
-                                  <span className="member-avatar-small">{member.initials}</span>
-                                  {member.name}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </div>
-                    </div>
-                  ))}
-                  <button 
-                    className="modal-add-checklist-button"
-                    onClick={addChecklistItem}
-                  >
-                    + Adicionar Item
-                  </button>
+                    ))}
+                    
+                    {/* Botão para adicionar novo item */}
+                    <button 
+                      className="add-checklist-button"
+                      onClick={addChecklistItem}
+                    >
+                      <PlusIcon style={{ width: '16px', height: '16px' }} />
+                      Adicionar Item
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* Seção de Comentários */}
+              {/* Dropdown de Atividade/Comentários */}
               <button 
                 className="modal-dropdown-header"
                 onClick={() => setCommentsExpanded(!commentsExpanded)}
               >
-                <span className="modal-dropdown-title"> Comentários</span>
-                {/* ✅ Ícone substituindo a seta ▼ */}
-                    <ChevronDownIcon
-                      style={{ width: '16px', height: '16px' }} // 🔧 Ajuste direto via inline style
-                        className={`text-gray-500 transition-transform duration-200 ${commentsExpanded ? 'rotate-180' : ''}`} />
+                <span className="modal-dropdown-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <ChatBubbleBottomCenterTextIcon style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                  Atividade
+                </span>
+                <ChevronDownIcon
+                  style={{ width: '16px', height: '16px' }}
+                  className={`text-gray-500 transition-transform duration-200 ${commentsExpanded ? 'rotate-180' : ''}`} 
+                />
               </button>
               {commentsExpanded && (
                 <div className="modal-dropdown-content">
-                  {comments[event.id] && comments[event.id].length > 0 ? (
-                    comments[event.id].map(comment => (
-                      <div key={comment.id} className="modal-comment-item">
-                        <div className="modal-comment-header">
-                          <div className="modal-member-avatar">
-                            <span className="modal-member-initials">
-                              {comment.author.split(' ').map(n => n[0]).join('').substring(0, 2)}
-                            </span>
-                          </div>
-                          <div className="modal-comment-text-header">
-                            <span className="modal-comment-author">{comment.author}</span>
-                            <span className="modal-comment-time">{comment.timestamp}</span>
-                          </div>
-                        </div>
-                        <p className="modal-comment-text">{comment.text}</p>
+                  {/* Área de adicionar comentário */}
+                  <div className="add-comment-section">
+                    <div className="comment-input-container">
+                      <div className="comment-avatar">
+                        {userName ? userName.charAt(0).toUpperCase() : 'U'}
                       </div>
-                    ))
-                  ) : (
-                    <p className="modal-no-comments">Nenhum comentário ainda.</p>
-                  )}
-                  
-                  <div className="modal-add-comment-container">
-                    <textarea
-                      className="modal-comment-input"
-                      placeholder="Adicione um comentário..."
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      rows="3"
-                    ></textarea>
+                      <textarea
+                        className="comment-input"
+                        placeholder="Escreva um comentário..."
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        rows="3"
+                      />
+                    </div>
                     <button 
-                      className="modal-send-comment-button"
+                      className="add-comment-button"
                       onClick={handleAddComment}
                       disabled={!newComment.trim()}
                     >
-                      Enviar
+                      Comentar
                     </button>
+                  </div>
+
+                  {/* Lista de comentários */}
+                  <div className="comments-list">
+                    {(comments[eventData.id] || []).map((comment) => (
+                      <div key={comment.id} className="comment-item">
+                        <div className="comment-avatar">
+                          {comment.author.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="comment-content">
+                          <div className="comment-header">
+                            <span className="comment-author">{comment.author}</span>
+                            <span className="comment-timestamp">{comment.timestamp}</span>
+                          </div>
+                          <div className="comment-text">{comment.text}</div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -551,8 +723,8 @@ const removeEventMember = (memberId) => {
               {/* Seção de Membros da Equipe */}
               <div className="modal-members-section">
                 <div className="modal-members-header">
-                  <h3 className="modal-section-title">👥 Membros da Equipe</h3>
-                  <div className="modal-add-member-container" style={{ position: 'relative' }}>
+                  <h3 className="modal-members-title">👥 Membros da Equipe</h3>
+                  <div className="modal-add-member-container">
                     <button 
                       className="modal-add-member-button"
                       onClick={() => setShowMemberDropdown(!showMemberDropdown)}
@@ -561,67 +733,27 @@ const removeEventMember = (memberId) => {
                     </button>
                     
                     {showMemberDropdown && (
-                      <div className="member-dropdown-menu" style={{
-                        position: 'absolute',
-                        top: '100%',
-                        right: '0',
-                        backgroundColor: 'white',
-                        border: '1px solid #ddd',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                        zIndex: 1000,
-                        minWidth: '200px',
-                        maxHeight: '200px',
-                        overflowY: 'auto'
-                      }}>
+                      <div className="modal-member-dropdown">
                         {availableMembers
                           .filter(member => !assignedMembers.find(assigned => assigned.id === member.id))
                           .map(member => (
-                            <button
-                              key={member.id}
-                              className="member-dropdown-item"
+                            <div 
+                              key={member.id} 
+                              className="modal-member-option"
                               onClick={() => {
                                 addEventMember(member);
                                 setShowMemberDropdown(false);
                               }}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                width: '100%',
-                                padding: '8px 12px',
-                                border: 'none',
-                                backgroundColor: 'transparent',
-                                cursor: 'pointer',
-                                fontSize: '14px',
-                                textAlign: 'left'
-                              }}
-                              onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
-                              onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                             >
-                              <div 
-                                className="member-avatar-small" 
-                                style={{
-                                  width: '24px',
-                                  height: '24px',
-                                  borderRadius: '50%',
-                                  backgroundColor: '#4a6da7',
-                                  color: 'white',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '10px',
-                                  fontWeight: 'bold'
-                                }}
-                              >
+                              <div className="modal-member-avatar">
                                 {member.initials}
                               </div>
-                              {member.name}
-                            </button>
+                              <span className="modal-member-name">{member.name}</span>
+                            </div>
                           ))
                         }
                         {availableMembers.filter(member => !assignedMembers.find(assigned => assigned.id === member.id)).length === 0 && (
-                          <div style={{ padding: '12px', color: '#888', fontSize: '14px', textAlign: 'center' }}>
+                          <div className="modal-no-members">
                             Todos os membros já foram adicionados
                           </div>
                         )}
@@ -629,50 +761,33 @@ const removeEventMember = (memberId) => {
                     )}
                   </div>
                 </div>
-
+                
                 <div className="modal-members-list">
-                  {assignedMembers.length === 0 ? (
-                    <p style={{ fontStyle: 'italic', color: '#888' }}>Nenhum membro atribuído ainda.</p>
-                  ) : (
-                    assignedMembers.map((member) => (
-                      <div
-                        key={member.id}
-                        className="modal-member-item"
-                        onMouseEnter={() => setHovered(member.id)}
-                        onMouseLeave={() => setHovered(null)}
-                        style={{ position: 'relative' }}
-                      >
-                        <div className="modal-member-avatar" style={{ backgroundColor: '#4a6da7' }}>
-                          {member.initials}
-                        </div>
+                  {assignedMembers.length > 0 ? (
+                    assignedMembers.map(member => (
+                      <div key={member.id} className="modal-member-item">
                         <div className="modal-member-info">
-                          <span className="modal-member-name">{member.name}</span>
-                          <span className="modal-member-role">Membro</span>
+                          <div className="modal-member-avatar">
+                            {member.initials}
+                          </div>
+                          <div className="modal-member-details">
+                            <span className="modal-member-name">{member.name}</span>
+                            <span className="modal-member-role">Membro da Equipe</span>
+                          </div>
                         </div>
-
-                        {/* Botão X visível ao passar o mouse */}
-                        {hovered === member.id && (
-                          <button
-                            className="modal-remove-member-button"
-                            onClick={() => removeEventMember(member.id)}
-                            title="Remover membro"
-                            style={{
-                              position: 'absolute',
-                              top: '4px',
-                              right: '4px',
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#e74c3c',
-                              fontWeight: 'bold',
-                              cursor: 'pointer',
-                              fontSize: '14px'
-                            }}
-                          >
-                            ×
-                          </button>
-                        )}
+                        <button 
+                          className="modal-remove-member-button"
+                          onClick={() => removeEventMember(member.id)}
+                          title="Remover membro"
+                        >
+                          ×
+                        </button>
                       </div>
                     ))
+                  ) : (
+                    <div className="modal-no-members-assigned">
+                      Nenhum membro atribuído ainda
+                    </div>
                   )}
                 </div>
               </div>
